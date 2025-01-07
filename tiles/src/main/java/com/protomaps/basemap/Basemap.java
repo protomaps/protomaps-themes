@@ -34,7 +34,7 @@ public class Basemap extends ForwardingProfile {
     var admin = new Boundaries();
     registerHandler(admin);
     registerSourceHandler("osm", admin::processOsm);
-//    registerSourceHandler("ne", admin::processNe);
+    registerSourceHandler("ne", admin::processNe);
 
     var buildings = new Buildings();
     registerHandler(buildings);
@@ -46,7 +46,7 @@ public class Basemap extends ForwardingProfile {
 
     var landcover = new Landcover();
     registerHandler(landcover);
-//    registerSourceHandler("landcover", landcover::processLandcover);
+    registerSourceHandler("landcover", landcover::processLandcover);
 
     var place = new Places(naturalEarthDb);
     registerHandler(place);
@@ -67,14 +67,14 @@ public class Basemap extends ForwardingProfile {
     var water = new Water();
     registerHandler(water);
     registerSourceHandler("osm", water::processOsm);
-//    registerSourceHandler("osm_water", water::processPreparedOsm);
+    registerSourceHandler("osm_water", water::processPreparedOsm);
     registerSourceHandler("ne", water::processNe);
 
     var earth = new Earth();
     registerHandler(earth);
 
     registerSourceHandler("osm", earth::processOsm);
-//    registerSourceHandler("osm_land", earth::processPreparedOsm);
+    registerSourceHandler("osm_land", earth::processPreparedOsm);
     registerSourceHandler("ne", earth::processNe);
 
     if (clip != null) {
@@ -140,14 +140,14 @@ public class Basemap extends ForwardingProfile {
     String area = args.getString("area", "geofabrik area to download", "monaco");
 
     var planetiler = Planetiler.create(args)
-//      .addNaturalEarthSource("ne", nePath, neUrl)
-      .addOsmSource("osm", Path.of("data", "sources", area + ".osm.pbf"), "geofabrik:" + area);
-//      .addShapefileSource("osm_water", sourcesDir.resolve("water-polygons-split-3857.zip"),
-//        "https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip")
-//      .addShapefileSource("osm_land", sourcesDir.resolve("land-polygons-split-3857.zip"),
-//        "https://osmdata.openstreetmap.de/download/land-polygons-split-3857.zip")
-//      .addGeoPackageSource("landcover", sourcesDir.resolve("daylight-landcover.gpkg"),
-//        "https://r2-public.protomaps.com/datasets/daylight-landcover.gpkg");
+            .addNaturalEarthSource("ne", nePath, neUrl)
+      .addOsmSource("osm", Path.of("data", "sources", area + ".osm.pbf"), "geofabrik:" + area)
+          .addShapefileSource("osm_water", sourcesDir.resolve("water-polygons-split-3857.zip"),
+            "https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip")
+          .addShapefileSource("osm_land", sourcesDir.resolve("land-polygons-split-3857.zip"),
+            "https://osmdata.openstreetmap.de/download/land-polygons-split-3857.zip")
+          .addGeoPackageSource("landcover", sourcesDir.resolve("daylight-landcover.gpkg"),
+            "https://r2-public.protomaps.com/datasets/daylight-landcover.gpkg");
 
     Path pgfEncodingZip = sourcesDir.resolve("pgf-encoding.zip");
     Downloader.create(planetiler.config()).add("ne", neUrl, nePath)
