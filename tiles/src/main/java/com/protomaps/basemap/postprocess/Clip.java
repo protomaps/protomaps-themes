@@ -22,7 +22,7 @@ import static com.onthegomap.planetiler.render.TiledGeometry.sliceIntoTiles;
 
 public class Clip implements ForwardingProfile.TilePostProcessor {
 
-  private final TiledGeometry tiledGeometry;
+  private final Map<Integer, Map<TileCoord, List<List<CoordinateSequence>>>> data;
 
   private static Coordinate[] parseCoordinates(ArrayNode coordinateArray) {
     Coordinate[] coordinates = new Coordinate[coordinateArray.size()];
@@ -37,11 +37,14 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
 
   public Clip(Geometry input) {
     var clipGeometry = latLonToWorldCoords(input);
-    double scale = 1 << 15;
-    Geometry scaled = AffineTransformation.scaleInstance(scale, scale).transform(clipGeometry);
-    var extents = TileExtents.computeFromWorldBounds(15, WORLD_BOUNDS);
+    data = new HashMap<>();
     try {
-      this.tiledGeometry = sliceIntoTiles(scaled, 0, 0, 15, extents.getForZoom(15));
+      for (var i = 0; i <= 15; i++) {
+        var extents = TileExtents.computeFromWorldBounds(i, WORLD_BOUNDS);
+        double scale = 1 << i;
+        Geometry scaled = AffineTransformation.scaleInstance(scale, scale).transform(clipGeometry);
+        this.data.put(i, sliceIntoTiles(scaled, 0, 0, i, extents.getForZoom(i)).getTileData());
+      }
     } catch (GeometryException e) {
       throw new RuntimeException("Error clipping");
     }
@@ -49,12 +52,11 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
 
   // turn the input geometry into a bitmap
   // must be a GeoJSON Polygon or MultiPolygon
-  public static Clip fromGeoJSON() {
+  public static Clip fromGeoJSON(byte[] bytes) {
     Geometry clipGeometry;
     try {
-      var s = "{\"coordinates\": [[[7.4160,43.7252],[7.4215,43.7252],[7.4215,43.7294],[7.4160,43.7294],[7.4160,43.7252]]],\"type\": \"Polygon\"}";
       ObjectMapper mapper = new ObjectMapper();
-      JsonNode geoJson = mapper.readTree(s);
+      JsonNode geoJson = mapper.readTree(bytes);
       if (geoJson.get("type").asText().equals("Polygon")) {
         var coords = geoJson.get("coordinates");
         ArrayNode outerRingNode = (ArrayNode) coords.get(0);
@@ -107,11 +109,11 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
 
   @Override
   public Map<String, List<VectorTile.Feature>> postProcessTile(TileCoord tileCoord, Map<String, List<VectorTile.Feature>> map) throws GeometryException {
-    if (!tiledGeometry.getTileData().containsKey(tileCoord)) {
-      return map;
+    if (!(this.data.containsKey(tileCoord.z()) && this.data.get(tileCoord.z()).containsKey(tileCoord))) {
+      return Map.of();
     }
 
-    List<List<CoordinateSequence>> coords = tiledGeometry.getTileData().get(tileCoord);
+    List<List<CoordinateSequence>> coords = data.get(tileCoord.z()).get(tileCoord);
     var clipGeometry = reassemblePolygons(coords);
 
     Map<String, List<VectorTile.Feature>> output = new HashMap<>();

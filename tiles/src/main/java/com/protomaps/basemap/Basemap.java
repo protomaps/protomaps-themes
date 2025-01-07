@@ -18,7 +18,11 @@ import com.protomaps.basemap.layers.Transit;
 import com.protomaps.basemap.layers.Water;
 import com.protomaps.basemap.text.FontRegistry;
 import com.protomaps.basemap.postprocess.Clip;
+
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -160,7 +164,13 @@ public class Basemap extends ForwardingProfile {
     FontRegistry fontRegistry = FontRegistry.getInstance();
     fontRegistry.setZipFilePath(pgfEncodingZip.toString());
 
-    var clip = Clip.fromGeoJSON();
+    var bytes = new byte[0];
+    try {
+      bytes = Files.readAllBytes(Paths.get("clip.json"));
+    } catch (IOException e) {
+      throw new RuntimeException(e.getMessage());
+    }
+    var clip = Clip.fromGeoJSON(bytes);
 
     fontRegistry.loadFontBundle("NotoSansDevanagari-Regular", "1", "Devanagari");
 
