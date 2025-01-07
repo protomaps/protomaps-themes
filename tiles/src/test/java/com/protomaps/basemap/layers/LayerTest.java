@@ -24,7 +24,7 @@ abstract class LayerTest {
     List.of(new NaturalEarthDb.NeAdmin1StateProvince("California", "US-CA", "Q2", 5.0, 8.0)),
     List.of(new NaturalEarthDb.NePopulatedPlace("San Francisco", "Q3", 9.0, 2))
   );
-  final Basemap profile = new Basemap(naturalEarthDb, null);
+  final Basemap profile = new Basemap(naturalEarthDb, null, null);
 
   static void assertFeatures(int zoom, List<Map<String, Object>> expected, Iterable<FeatureCollector.Feature> actual) {
     var expectedList = expected.stream().toList();
