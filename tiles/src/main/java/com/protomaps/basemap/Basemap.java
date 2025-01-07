@@ -16,9 +16,8 @@ import com.protomaps.basemap.layers.Pois;
 import com.protomaps.basemap.layers.Roads;
 import com.protomaps.basemap.layers.Transit;
 import com.protomaps.basemap.layers.Water;
-import com.protomaps.basemap.text.FontRegistry;
 import com.protomaps.basemap.postprocess.Clip;
-
+import com.protomaps.basemap.text.FontRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

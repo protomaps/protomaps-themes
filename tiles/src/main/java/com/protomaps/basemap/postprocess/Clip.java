@@ -1,5 +1,10 @@
 package com.protomaps.basemap.postprocess;
 
+import static com.onthegomap.planetiler.geo.GeoUtils.WORLD_BOUNDS;
+import static com.onthegomap.planetiler.geo.GeoUtils.latLonToWorldCoords;
+import static com.onthegomap.planetiler.render.TiledGeometry.getCoveredTiles;
+import static com.onthegomap.planetiler.render.TiledGeometry.sliceIntoTiles;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -7,22 +12,18 @@ import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import com.onthegomap.planetiler.geo.*;
 import com.onthegomap.planetiler.render.TiledGeometry;
-import org.locationtech.jts.geom.*;
-import org.locationtech.jts.geom.util.AffineTransformation;
-
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-
-import static com.onthegomap.planetiler.geo.GeoUtils.WORLD_BOUNDS;
-import static com.onthegomap.planetiler.geo.GeoUtils.latLonToWorldCoords;
-import static com.onthegomap.planetiler.render.TiledGeometry.sliceIntoTiles;
+import org.locationtech.jts.geom.*;
+import org.locationtech.jts.geom.util.AffineTransformation;
 
 public class Clip implements ForwardingProfile.TilePostProcessor {
 
   private final Map<Integer, Map<TileCoord, List<List<CoordinateSequence>>>> data;
+  private final Map<Integer, TiledGeometry.CoveredTiles> coverings;
 
   private static Coordinate[] parseCoordinates(ArrayNode coordinateArray) {
     Coordinate[] coordinates = new Coordinate[coordinateArray.size()];
@@ -38,12 +39,14 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
   public Clip(Geometry input) {
     var clipGeometry = latLonToWorldCoords(input);
     data = new HashMap<>();
+    coverings = new HashMap<>();
     try {
       for (var i = 0; i <= 15; i++) {
         var extents = TileExtents.computeFromWorldBounds(i, WORLD_BOUNDS);
         double scale = 1 << i;
         Geometry scaled = AffineTransformation.scaleInstance(scale, scale).transform(clipGeometry);
-        this.data.put(i, sliceIntoTiles(scaled, 0, 0, i, extents.getForZoom(i)).getTileData());
+        this.data.put(i, sliceIntoTiles(scaled, 0, 0.015625, i, extents.getForZoom(i)).getTileData());
+        this.coverings.put(i, getCoveredTiles(scaled, i, extents.getForZoom(i)));
       }
     } catch (GeometryException e) {
       throw new RuntimeException("Error clipping");
@@ -108,31 +111,33 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
   }
 
   @Override
-  public Map<String, List<VectorTile.Feature>> postProcessTile(TileCoord tileCoord, Map<String, List<VectorTile.Feature>> map) throws GeometryException {
-    if (!(this.data.containsKey(tileCoord.z()) && this.data.get(tileCoord.z()).containsKey(tileCoord))) {
-      return Map.of();
-    }
+  public Map<String, List<VectorTile.Feature>> postProcessTile(TileCoord tileCoord,
+    Map<String, List<VectorTile.Feature>> map) throws GeometryException {
+    if (this.coverings.containsKey(tileCoord.z()) &&
+      this.coverings.get(tileCoord.z()).test(tileCoord.x(), tileCoord.y())) {
+      if (this.data.containsKey(tileCoord.z()) && this.data.get(tileCoord.z()).containsKey(tileCoord)) {
+        List<List<CoordinateSequence>> coords = data.get(tileCoord.z()).get(tileCoord);
+        var clipGeometry = reassemblePolygons(coords);
+        Map<String, List<VectorTile.Feature>> output = new HashMap<>();
+        for (Map.Entry<String, List<VectorTile.Feature>> layer : map.entrySet()) {
+          List<VectorTile.Feature> clippedFeatures = layer.getValue().stream().map(f -> {
+            try {
+              var newGeom = f.geometry().decode().intersection(clipGeometry);
+              if (!newGeom.isEmpty()) {
+                return f.copyWithNewGeometry(newGeom);
+              }
+            } catch (GeometryException e) {
+              System.err.println("Could not clip geometry");
+            }
+            return null;
+          }).filter(Objects::nonNull).toList();
 
-    List<List<CoordinateSequence>> coords = data.get(tileCoord.z()).get(tileCoord);
-    var clipGeometry = reassemblePolygons(coords);
-
-    Map<String, List<VectorTile.Feature>> output = new HashMap<>();
-
-    for (Map.Entry<String, List<VectorTile.Feature>> layer : map.entrySet()) {
-      List<VectorTile.Feature> clippedFeatures = layer.getValue().stream().map(f -> {
-        try {
-          var newGeom = f.geometry().decode().intersection(clipGeometry);
-          if (!newGeom.isEmpty()) {
-            return f.copyWithNewGeometry(newGeom);
-          }
-        } catch (GeometryException e) {
-          System.err.println("Could not clip geometry");
+          output.put(layer.getKey(), clippedFeatures);
         }
-        return null;
-      }).filter(Objects::nonNull).toList();
-
-      output.put(layer.getKey(), clippedFeatures);
+        return output;
+      }
+      return map;
     }
-    return output;
+    return Map.of();
   }
 }
