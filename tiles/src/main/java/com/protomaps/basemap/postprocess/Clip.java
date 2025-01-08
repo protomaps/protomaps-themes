@@ -13,17 +13,19 @@ import com.onthegomap.planetiler.VectorTile;
 import com.onthegomap.planetiler.geo.*;
 import com.onthegomap.planetiler.render.TiledGeometry;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
+
+import com.onthegomap.planetiler.stats.Stats;
 import org.locationtech.jts.geom.*;
 import org.locationtech.jts.geom.util.AffineTransformation;
+import org.locationtech.jts.operation.overlayng.OverlayNG;
+import org.locationtech.jts.operation.overlayng.OverlayNGRobust;
 
 public class Clip implements ForwardingProfile.TilePostProcessor {
 
   private final Map<Integer, Map<TileCoord, List<List<CoordinateSequence>>>> data;
   private final Map<Integer, TiledGeometry.CoveredTiles> coverings;
+  private final Stats stats;
 
   private static Coordinate[] parseCoordinates(ArrayNode coordinateArray) {
     Coordinate[] coordinates = new Coordinate[coordinateArray.size()];
@@ -37,7 +39,8 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
   }
 
   public Clip(Geometry input) {
-    var clipGeometry = latLonToWorldCoords(input);
+    stats = Stats.inMemory();
+    var clipGeometry = latLonToWorldCoords(input).buffer(0.00001);
     data = new HashMap<>();
     coverings = new HashMap<>();
     try {
@@ -45,6 +48,7 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
         var extents = TileExtents.computeFromWorldBounds(i, WORLD_BOUNDS);
         double scale = 1 << i;
         Geometry scaled = AffineTransformation.scaleInstance(scale, scale).transform(clipGeometry);
+//        var simplified = DouglasPeuckerSimplifier.simplify(scaled, 0.25/256);
         this.data.put(i, sliceIntoTiles(scaled, 0, 0.015625, i, extents.getForZoom(i)).getTileData());
         this.coverings.put(i, getCoveredTiles(scaled, i, extents.getForZoom(i)));
       }
@@ -53,8 +57,6 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
     }
   }
 
-  // turn the input geometry into a bitmap
-  // must be a GeoJSON Polygon or MultiPolygon
   public static Clip fromGeoJSON(byte[] bytes) {
     Geometry clipGeometry;
     try {
@@ -118,19 +120,46 @@ public class Clip implements ForwardingProfile.TilePostProcessor {
       if (this.data.containsKey(tileCoord.z()) && this.data.get(tileCoord.z()).containsKey(tileCoord)) {
         List<List<CoordinateSequence>> coords = data.get(tileCoord.z()).get(tileCoord);
         var clipGeometry = reassemblePolygons(coords);
+        var clipGeometry2 = GeoUtils.snapAndFixPolygon(clipGeometry, stats, "render");
+        clipGeometry2.reverse();
         Map<String, List<VectorTile.Feature>> output = new HashMap<>();
+
         for (Map.Entry<String, List<VectorTile.Feature>> layer : map.entrySet()) {
-          List<VectorTile.Feature> clippedFeatures = layer.getValue().stream().map(f -> {
+          List<VectorTile.Feature> clippedFeatures = new ArrayList<>();
+          for (var feature : layer.getValue()) {
             try {
-              var newGeom = f.geometry().decode().intersection(clipGeometry);
-              if (!newGeom.isEmpty()) {
-                return f.copyWithNewGeometry(newGeom);
+              var newGeom = OverlayNGRobust.overlay(feature.geometry().decode(), clipGeometry2, OverlayNG.INTERSECTION);
+              if (!newGeom.isEmpty() && newGeom.getNumGeometries() > 0) {
+                if (newGeom instanceof Polygonal) {
+                  newGeom = GeoUtils.snapAndFixPolygon(newGeom, stats, "render");
+                  newGeom = newGeom.reverse();
+                  if (!newGeom.isEmpty() && newGeom.getNumGeometries() > 0) {
+                    if (newGeom instanceof GeometryCollection) {
+                      for (int i = 0; i < newGeom.getNumGeometries(); i++) {
+                        // geometrycollection
+                        clippedFeatures.add(feature.copyWithNewGeometry(newGeom.getGeometryN(i)));
+                      }
+                    } else {
+                      // a multipolygon/polygon
+                      clippedFeatures.add(feature.copyWithNewGeometry(newGeom));
+                    }
+                  }
+                } else {
+                  if (!newGeom.isEmpty() && newGeom.getNumGeometries() > 0) {
+                    if (newGeom instanceof GeometryCollection) {
+                      for (int i = 0; i < newGeom.getNumGeometries(); i++) {
+                        clippedFeatures.add(feature.copyWithNewGeometry(newGeom.getGeometryN(i)));
+                      }
+                    } else {
+                      clippedFeatures.add(feature.copyWithNewGeometry(newGeom));
+                    }
+                  }
+                }
               }
             } catch (GeometryException e) {
               System.err.println("Could not clip geometry");
             }
-            return null;
-          }).filter(Objects::nonNull).toList();
+          }
 
           output.put(layer.getKey(), clippedFeatures);
         }
