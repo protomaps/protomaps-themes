@@ -163,13 +163,13 @@ public class Basemap extends ForwardingProfile {
     FontRegistry fontRegistry = FontRegistry.getInstance();
     fontRegistry.setZipFilePath(pgfEncodingZip.toString());
 
-    var bytes = new byte[0];
-    try {
-      bytes = Files.readAllBytes(Paths.get("clip.json"));
-    } catch (IOException e) {
-      throw new RuntimeException(e.getMessage());
+
+
+    Clip clip = null;
+    var clipArg = args.getString("clip","File path to GeoJSON Polygon or MultiPolygon geometry to clip tileset.");
+    if (!clipArg.isEmpty()) {
+      clip = Clip.fromGeoJSONFile(args.getStats(), clipArg);
     }
-    var clip = Clip.fromGeoJSON(bytes);
 
     fontRegistry.loadFontBundle("NotoSansDevanagari-Regular", "1", "Devanagari");
 
