@@ -8,6 +8,7 @@ import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.reader.SourceFeature;
+import com.protomaps.basemap.feature.CountryCoder;
 import com.protomaps.basemap.feature.FeatureId;
 import com.protomaps.basemap.locales.CartographicLocale;
 import com.protomaps.basemap.locales.US;
@@ -15,6 +16,12 @@ import com.protomaps.basemap.names.OsmNames;
 import java.util.*;
 
 public class Roads implements ForwardingProfile.LayerPostProcesser {
+
+  private CountryCoder countryCoder;
+
+  public Roads(CountryCoder countryCoder) {
+    this.countryCoder = countryCoder;
+  }
 
   @Override
   public String name() {
@@ -146,6 +153,13 @@ public class Roads implements ForwardingProfile.LayerPostProcesser {
         .setMinPixelSize(0)
         .setPixelTolerance(0)
         .setZoomRange(minZoom, maxZoom);
+
+      try {
+        var code = countryCoder.getCountryCode(sf.latLonGeometry());
+        feat.setAttr("country_code", code);
+      } catch (Exception e) {
+
+      }
 
       if (!kindDetail.isEmpty()) {
         feat.setAttr("kind_detail", kindDetail);
