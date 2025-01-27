@@ -16,8 +16,12 @@ import com.protomaps.basemap.layers.Pois;
 import com.protomaps.basemap.layers.Roads;
 import com.protomaps.basemap.layers.Transit;
 import com.protomaps.basemap.layers.Water;
+import com.protomaps.basemap.postprocess.Clip;
 import com.protomaps.basemap.text.FontRegistry;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +29,7 @@ import java.util.Map;
 
 public class Basemap extends ForwardingProfile {
 
-  public Basemap(NaturalEarthDb naturalEarthDb, QrankDb qrankDb) {
+  public Basemap(NaturalEarthDb naturalEarthDb, QrankDb qrankDb, Clip clip) {
 
     var admin = new Boundaries();
     registerHandler(admin);
@@ -72,6 +76,10 @@ public class Basemap extends ForwardingProfile {
     registerSourceHandler("osm", earth::processOsm);
     registerSourceHandler("osm_land", earth::processPreparedOsm);
     registerSourceHandler("ne", earth::processNe);
+
+    if (clip != null) {
+      registerHandler(clip);
+    }
   }
 
   @Override
@@ -132,14 +140,14 @@ public class Basemap extends ForwardingProfile {
     String area = args.getString("area", "geofabrik area to download", "monaco");
 
     var planetiler = Planetiler.create(args)
-      .addNaturalEarthSource("ne", nePath, neUrl)
+            .addNaturalEarthSource("ne", nePath, neUrl)
       .addOsmSource("osm", Path.of("data", "sources", area + ".osm.pbf"), "geofabrik:" + area)
-      .addShapefileSource("osm_water", sourcesDir.resolve("water-polygons-split-3857.zip"),
-        "https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip")
-      .addShapefileSource("osm_land", sourcesDir.resolve("land-polygons-split-3857.zip"),
-        "https://osmdata.openstreetmap.de/download/land-polygons-split-3857.zip")
-      .addGeoPackageSource("landcover", sourcesDir.resolve("daylight-landcover.gpkg"),
-        "https://r2-public.protomaps.com/datasets/daylight-landcover.gpkg");
+          .addShapefileSource("osm_water", sourcesDir.resolve("water-polygons-split-3857.zip"),
+            "https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip")
+          .addShapefileSource("osm_land", sourcesDir.resolve("land-polygons-split-3857.zip"),
+            "https://osmdata.openstreetmap.de/download/land-polygons-split-3857.zip")
+          .addGeoPackageSource("landcover", sourcesDir.resolve("daylight-landcover.gpkg"),
+            "https://r2-public.protomaps.com/datasets/daylight-landcover.gpkg");
 
     Path pgfEncodingZip = sourcesDir.resolve("pgf-encoding.zip");
     Downloader.create(planetiler.config()).add("ne", neUrl, nePath)
@@ -155,9 +163,17 @@ public class Basemap extends ForwardingProfile {
     FontRegistry fontRegistry = FontRegistry.getInstance();
     fontRegistry.setZipFilePath(pgfEncodingZip.toString());
 
+
+
+    Clip clip = null;
+    var clipArg = args.getString("clip","File path to GeoJSON Polygon or MultiPolygon geometry to clip tileset.");
+    if (!clipArg.isEmpty()) {
+      clip = Clip.fromGeoJSONFile(args.getStats(), clipArg);
+    }
+
     fontRegistry.loadFontBundle("NotoSansDevanagari-Regular", "1", "Devanagari");
 
-    planetiler.setProfile(new Basemap(naturalEarthDb, qrankDb)).setOutput(Path.of(area + ".pmtiles"))
+    planetiler.setProfile(new Basemap(naturalEarthDb, qrankDb, clip)).setOutput(Path.of(area + ".pmtiles"))
       .run();
   }
 }
