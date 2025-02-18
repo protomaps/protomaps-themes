@@ -90,6 +90,14 @@ function BuildComponent(props: {
     props.setCmpB(idx);
   };
 
+  const compatibleNpmVersions = (v: string) => {
+    try {
+      return VERSION_COMPATIBILITY[+v.split(".")[0]].join(",");
+    } catch (e) {
+      return "";
+    }
+  };
+
   return (
     <tr style={{ color: date.getDay() === 1 ? "black" : "#aaa" }}>
       <td>
@@ -110,10 +118,8 @@ function BuildComponent(props: {
         />
       </td>
       <td title={build.uploaded}>{build.key}</td>
-      <td>
-        {build.version}{" "}
-        {build.version < "4" ? "(requires old style version)" : ""}
-      </td>
+      <td>{compatibleNpmVersions(build.version)}</td>
+      <td>{build.version}</td>
       <td class="hidden lg:table-cell">{formatBytes(build.size)}</td>
       <td class="hidden lg:table-cell">{Hashes(build)}</td>
       <td>
@@ -185,18 +191,6 @@ function Builds() {
 
   const theme = "light";
 
-  const latestMajorTileVersion = () => {
-    const b = builds();
-    if (b) return +b[0].version.split(".")[0];
-  };
-
-  const compatibleNpmVersions = () => {
-    const l = latestMajorTileVersion();
-    if (l) {
-      return VERSION_COMPATIBILITY[l].join(", ");
-    }
-  };
-
   const openVisualTests = () => {
     const left = `https://build.protomaps.com/${builds()[cmpA()].key}`;
     const right = `https://build.protomaps.com/${builds()[cmpB()].key}`;
@@ -243,19 +237,6 @@ function Builds() {
           </a>{" "}
           for how to use.
         </p>
-        <p>
-          The latest tiles version ({latestMajorTileVersion()}) is compatible
-          with{" "}
-          <a
-            class="underline"
-            target="_blank"
-            rel="noreferrer"
-            href="https://www.npmjs.com/package/@protomaps/basemaps"
-          >
-            @protomaps/basemaps
-          </a>{" "}
-          versions {compatibleNpmVersions()}.
-        </p>
         <div class="space-x-2 my-2">
           <button class="btn-primary" type="button" onClick={openVisualTests}>
             Compare selected versions
@@ -267,6 +248,29 @@ function Builds() {
           ) : null}
         </div>
         <table class="table-auto border-separate text-xs lg:text-base border-spacing-2 lg:border-spacing-4 font-mono">
+          <thead class="text-sm">
+            <tr>
+              <th />
+              <th>date</th>
+              <th>
+                compatible{" "}
+                <a
+                  class="underline"
+                  href="https://www.npmjs.com/package/@protomaps/basemaps"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  npm versions
+                </a>
+              </th>
+              <th>tileset version</th>
+              <th>size</th>
+              <th>hashes</th>
+              <th />
+              <th />
+              <th />
+            </tr>
+          </thead>
           <tbody>
             <For each={builds()}>
               {(build, idx) => (
