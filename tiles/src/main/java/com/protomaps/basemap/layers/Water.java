@@ -1,9 +1,17 @@
 package com.protomaps.basemap.layers;
 
+import static com.protomaps.basemap.feature.Matcher.fromTag;
+import static com.protomaps.basemap.feature.Matcher.getInteger;
+import static com.protomaps.basemap.feature.Matcher.getString;
+import static com.protomaps.basemap.feature.Matcher.rule;
+import static com.protomaps.basemap.feature.Matcher.use;
+import static com.protomaps.basemap.feature.Matcher.with;
+
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
+import com.onthegomap.planetiler.expression.MultiExpression;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.reader.SourceFeature;
@@ -12,8 +20,8 @@ import com.protomaps.basemap.feature.FeatureId;
 import com.protomaps.basemap.names.NeNames;
 import com.protomaps.basemap.names.OsmNames;
 import java.util.List;
+import java.util.Map;
 
-@SuppressWarnings("java:S1192") // Duplicated string literals
 public class Water implements ForwardingProfile.LayerPostProcessor {
 
   private static final double WORLD_AREA_FOR_70K_SQUARE_METERS =
@@ -21,13 +29,172 @@ public class Water implements ForwardingProfile.LayerPostProcessor {
 
   public static final String LAYER_NAME = "water";
 
+  private static final MultiExpression.Index<Map<String, Object>> neIndex = MultiExpression.of(List.of(
+    rule(
+      with("featurecla", "Ocean"),
+      use("minZoom", fromTag("min_zoom")),
+      use("kind", "ocean")
+    ),
+    rule(
+      with("featurecla", "Playa"),
+      use("minZoom", fromTag("min_zoom")),
+      use("kind", "playa")
+    ),
+    rule(
+      with("featurecla", "Reservoir"),
+      use("minZoom", fromTag("min_zoom")),
+      use("kind", "lake")
+    ),
+    rule(
+      with("featurecla", "Lake"),
+      use("minZoom", fromTag("min_zoom")),
+      use("kind", "lake")
+    ),
+    rule(
+      with("featurecla", "Alkaline Lake"),
+      use("minZoom", fromTag("min_zoom")),
+      use("kind", "lake")
+    )
+  )).index();
+
+  private static final MultiExpression.Index<Map<String, Object>> osmIndex = MultiExpression.of(List.of(
+    rule(
+      with("natural", "reef"),
+      use("kind", "reef")
+    ),
+    rule(
+      with("natural", "reef"),
+      with("""
+          reef
+          coral
+          rock
+          sand
+        """),
+      use("kindDetail", fromTag("reef"))
+    ),
+    rule(
+      with("waterway", "drain"),
+      use("kind", "drain"),
+      use("minZoom", 16)
+    ),
+    rule(
+      with("waterway", "ditch"),
+      use("kind", "ditch"),
+      use("minZoom", 16)
+    ),
+    rule(
+      with("waterway", "stream"),
+      use("kind", "stream"),
+      use("minZoom", 11)
+    ),
+    rule(
+      with("waterway", "river"),
+      use("kind", "river"),
+      use("minZoom", 9)
+    ),
+    rule(
+      with("waterway", "canal"),
+      use("kind", "canal"),
+      use("minZoom", 11)
+    ),
+    rule(
+      with("waterway", "canal"),
+      with("boat", "yes"),
+      use("kind", "canal"),
+      use("minZoom", 9)
+    ),
+    rule(
+      with("amenity", "swimming_pool"),
+      use("kind", "swimming_pool")
+    ),
+    rule(
+      with("leisure", "swimming_pool"),
+      use("kind", "swimming_pool")
+    ),
+    rule(
+      with("landuse", "reservoir"),
+      use("kind", "lake")
+    ),
+    rule(
+      with("landuse", "basin"),
+      use("kind", "basin")
+    ),
+    rule(
+      with("""
+          natural
+          fjord
+          strait
+          bay
+        """),
+      use("kind", fromTag("natural"))
+    ),
+    rule(
+      with("natural", "water"),
+      use("kind", "water")
+    ),
+    rule(
+      with("natural", "water"),
+      with("""
+          water
+          basin
+          canal
+          ditch
+          drain
+          lake
+          river
+          stream
+        """),
+      use("kindDetail", fromTag("water"))
+    ),
+    rule(
+      with("natural", "water"),
+      with("""
+          water
+          lagoon
+          oxbow
+          pond
+          reservoir
+          wastewater
+        """),
+      use("kindDetail", "lake")
+    ),
+    rule(
+      with("amenity", "fountain"),
+      use("kind", "fountain")
+    ),
+    rule(
+      with("waterway", "dock"),
+      use("kind", "dock")
+    ),
+    rule(
+      with("waterway", "riverbank"),
+      use("kind", "riverbank")
+    ),
+    rule(
+      with("covered", "yes"),
+      use("kind", null)
+    ),
+    rule(
+      with("name"),
+      with("place", "sea"),
+      use("kind", "sea"),
+      use("minZoom", 6)
+    ),
+    rule(
+      with("name"),
+      with("place", "ocean"),
+      use("kind", "ocean"),
+      use("minZoom", 6)
+    )
+  )).index();
+
   @Override
   public String name() {
     return LAYER_NAME;
   }
 
   public void processPreparedOsm(SourceFeature ignoredSf, FeatureCollector features) {
-    features.polygon(this.name())
+    features.polygon(LAYER_NAME)
       .setId(0)
       .setAttr("kind", "ocean")
       .setAttr("sort_rank", 200)
@@ -35,134 +202,65 @@ public class Water implements ForwardingProfile.LayerPostProcessor {
   }
 
   public void processNe(SourceFeature sf, FeatureCollector features) {
-    var sourceLayer = sf.getSourceLayer();
-    var kind = "";
-    var alkaline = 0;
-    var reservoir = 0;
-    var themeMinZoom = 0;
-    var themeMaxZoom = 0;
 
-    // Only process certain Natural Earth layers
-    // Notably the landscan derived urban areas and NA roads supplement themes causes problems otherwise
-    if (sourceLayer.equals("ne_50m_ocean") || sourceLayer.equals("ne_50m_lakes") ||
-      sourceLayer.equals("ne_10m_ocean") ||
-      sourceLayer.equals("ne_10m_lakes")) {
-      if (sourceLayer.equals("ne_50m_ocean")) {
-        themeMinZoom = 0;
-        themeMaxZoom = 4;
-      } else if (sourceLayer.equals("ne_50m_lakes")) {
-        themeMinZoom = 0;
-        themeMaxZoom = 4;
-      } else if (sourceLayer.equals("ne_10m_ocean")) {
-        themeMinZoom = 5;
-        themeMaxZoom = 5;
-      } else if (sourceLayer.equals("ne_10m_lakes")) {
-        themeMinZoom = 5;
-        themeMaxZoom = 5;
-      }
+    var matches = neIndex.getMatches(sf);
+    if (matches.isEmpty()) {
+      return;
+    }
 
-      switch (sf.getString("featurecla")) {
-        case "Alkaline Lake" -> {
-          kind = "lake";
-          alkaline = 1;
-        }
-        case "Lake" -> kind = "lake";
-        case "Reservoir" -> {
-          kind = "lake";
-          reservoir = 1;
-        }
-        case "Playa" -> kind = "playa";
-        case "Ocean" -> kind = "ocean";
-      }
+    String kind = getString(sf, matches, "kind", null);
+    if (kind == null) {
+      return;
+    }
 
-      if (!kind.isEmpty() && sf.hasTag("min_zoom")) {
-        features.polygon(this.name())
-          // Core Tilezen schema properties
-          .setAttr("kind", kind)
-          .setAttr("sort_rank", 200)
-          //.setAttr("min_zoom", sf.getLong("min_zoom"))
-          .setZoomRange(
-            sf.getString("min_zoom") == null ? themeMinZoom : (int) Double.parseDouble(sf.getString("min_zoom")) - 1,
-            themeMaxZoom)
-          // (nvkelso 20230802) Don't set setMinPixelSize here else small islands chains like Hawaii are garbled
-          .setBufferPixels(8);
-      }
+    String minZoomString = getString(sf, matches, "minZoom", null);
 
-      if (sourceLayer.equals("ne_10m_lakes")) {
-        var minZoom = sf.getLong("min_label");
-        if (!kind.isEmpty() && sf.hasTag("min_label") && sf.hasTag("name") && sf.getTag("name") != null) {
-          var waterLabelPosition = features.pointOnSurface(this.name())
-            .setAttr("kind", kind)
-            .setAttr("min_zoom", minZoom + 1)
-            .setZoomRange(sf.getString("min_label") == null ? themeMinZoom :
-              (int) Double.parseDouble(sf.getString("min_label")) + 1, themeMaxZoom)
-            .setBufferPixels(128);
+    if (sf.canBePolygon() && minZoomString != null) {
+      int minZoom = (int) Math.round(Double.parseDouble(minZoomString));
 
-          // Server sort features so client label collisions are pre-sorted
-          waterLabelPosition.setSortKey((int) minZoom);
+      int themeMinZoom = sf.getSourceLayer().contains("_50m_") ? 0 : 5;
+      int themeMaxZoom = sf.getSourceLayer().contains("_50m_") ? 4 : 5;
 
-          NeNames.setNeNames(waterLabelPosition, sf, 0);
-        }
-      }
+      features.polygon(LAYER_NAME)
+        .setAttr("kind", kind)
+        .setAttr("sort_rank", 200)
+        .setZoomRange(Math.max(themeMinZoom, minZoom), themeMaxZoom)
+        // (nvkelso 20230802) Don't set setMinPixelSize here else small islands chains like Hawaii are garbled
+        .setBufferPixels(8);
+    }
+
+    if (sf.getSourceLayer().equals("ne_10m_lakes") && sf.hasTag("min_label") && sf.hasTag("name")) {
+      int minZoom = (int) Math.round(Double.parseDouble(sf.getString("min_label")));
+      var waterLabelPosition = features.pointOnSurface(LAYER_NAME)
+        .setAttr("kind", kind)
+        .setAttr("min_zoom", minZoom + 1)
+        .setZoomRange(minZoom + 1, 5)
+        .setSortKey(minZoom)
+        .setBufferPixels(128);
+
+      NeNames.setNeNames(waterLabelPosition, sf, 0);
     }
   }
 
   public void processOsm(SourceFeature sf, FeatureCollector features) {
+
+    var matches = osmIndex.getMatches(sf);
+    if (matches.isEmpty()) {
+      return;
+    }
+
+    String kind = getString(sf, matches, "kind", null);
+    if (kind == null) {
+      return;
+    }
+
+    String kindDetail = getString(sf, matches, "kindDetail", null);
+
     // polygons
-    if (sf.canBePolygon() && (sf.hasTag("water") ||
-      (sf.hasTag("waterway") && !sf.hasTag("waterway", "dam")) ||
-      sf.hasTag("natural", "water") ||
-      sf.hasTag("landuse", "reservoir") ||
-      sf.hasTag("leisure", "swimming_pool"))) {
-      String kind = "other";
-      String kindDetail = "";
-      var reservoir = false;
-      var alkaline = false;
-
-      // coalesce values across tags to single kind value
-      if (sf.hasTag("natural", "water", "bay", "strait", "fjord")) {
-        kind = sf.getString("natural");
-
-        if (sf.hasTag("amenity", "fountain")) {
-          kind = "fountain";
-        }
-        if (sf.hasTag("water", "basin", "canal", "ditch", "drain", "lake", "river", "stream")) {
-          kindDetail = sf.getString("water");
-
-          // This is a bug in Tilezen v1.9 that should be fixed in 2.0
-          // But isn't present in Protomaps v2 so let's fix it preemptively
-          if (kindDetail.equals("lake")) {
-            kind = "lake";
-          }
-
-          if (sf.hasTag("water", "lagoon", "oxbow", "pond", "reservoir", "wastewater")) {
-            kindDetail = "lake";
-          }
-          if (sf.hasTag("water", "reservoir")) {
-            reservoir = true;
-          }
-          if (sf.hasTag("water", "lagoon", "salt", "salt_pool")) {
-            alkaline = true;
-          }
-        }
-      } else if (sf.hasTag("waterway", "riverbank", "dock", "canal", "river", "stream", "ditch", "drain")) {
-        kind = "water";
-        kindDetail = sf.getString("waterway");
-      } else if (sf.hasTag("landuse", "basin")) {
-        kind = sf.getString("landuse");
-      } else if (sf.hasTag("landuse", "reservoir")) {
-        kind = "water";
-        kindDetail = sf.getString("landuse");
-        reservoir = true;
-      } else if (sf.hasTag("leisure", "swimming_pool")) {
-        kind = "swimming_pool";
-      } else if (sf.hasTag("amenity", "swimming_pool")) {
-        kind = "swimming_pool";
-      }
-
-      var feature = features.polygon(this.name())
-        // Core Tilezen schema properties
+    if (sf.canBePolygon()) {
+      features.polygon(LAYER_NAME)
         .setAttr("kind", kind)
+        .setAttr("kind_detail", kindDetail)
         .setAttr("sort_rank", 200)
         // Core OSM tags for different kinds of places
         // Add less common attributes only at higher zooms
@@ -172,52 +270,20 @@ public class Water implements ForwardingProfile.LayerPostProcessor {
         .setZoomRange(6, 15)
         .setMinPixelSize(1.0)
         .setBufferPixels(8);
-
-      // Core Tilezen schema properties
-      if (!kindDetail.isEmpty()) {
-        feature.setAttr("kind_detail", kindDetail);
-      }
-      if (sf.hasTag("water", "reservoir") || reservoir) {
-        feature.setAttr("reservoir", true);
-      }
-      if (sf.hasTag("water", "lagoon", "salt", "salt_pool") || alkaline) {
-        feature.setAttr("alkaline", true);
-      }
-      if (sf.hasTag("intermittent", "yes")) {
-        feature.setAttr("intermittent", true);
-      }
-
-      //OsmNames.setOsmNames(feature, sf, 0);
     }
 
     // lines
-    if (sf.canBeLine() && !sf.canBePolygon() && sf.hasTag("waterway") &&
-      (!sf.hasTag("waterway", "riverbank", "reservoir", "dam"))) {
-      int minZoom = 12;
-      String kind = "other";
-      if (sf.hasTag("waterway")) {
-        kind = sf.getString("waterway");
-        if (sf.hasTag("waterway", "river")) {
-          minZoom = 9;
-        }
-      }
+    if (sf.canBeLine() && !sf.canBePolygon()) {
+      int minZoom = getInteger(sf, matches, "minZoom", 12);
 
-      var feat = features.line(this.name())
+      var feat = features.line(LAYER_NAME)
         .setId(FeatureId.create(sf))
         .setAttr("kind", kind)
-        // Used for client-side label collisions
         .setAttr("min_zoom", minZoom + 1)
-        // Add less common core Tilezen attributes only at higher zooms (will continue to v4)
-        //.setAttrWithMinzoom("bridge", sf.getString("bridge"), 12)
-        //.setAttrWithMinzoom("tunnel", sf.getString("tunnel"), 12)
         .setAttrWithMinzoom("layer", Parse.parseIntOrNull(sf.getString("layer")), 12)
         .setAttr("sort_rank", 200)
+        .setSortKey(minZoom)
         .setZoomRange(minZoom, 15);
-
-      // Add less common core Tilezen attributes only at higher zooms (will continue to v4)
-      if (sf.hasTag("intermittent", "yes")) {
-        feat.setAttr("intermittent", true);
-      }
 
       // Set "brunnel" (bridge / tunnel) property where "level" = 1 is a bridge, 0 is ground level, and -1 is a tunnel
       // Because of MapLibre performance and draw order limitations, generally the boolean is sufficient
@@ -232,92 +298,32 @@ public class Water implements ForwardingProfile.LayerPostProcessor {
         feat.setAttr("level", 0);
       }
 
-      // Server sort features so client label collisions are pre-sorted
-      feat.setSortKey(minZoom);
-
       OsmNames.setOsmNames(feat, sf, 0);
     }
 
     // points
-    if (sf.isPoint() && sf.hasTag("place", "sea", "ocean")) {
-      String kind = "";
-      int minZoom = 12;
-      if (sf.hasTag("place", "ocean")) {
-        kind = "ocean";
-        minZoom = 0;
-      }
-      if (sf.hasTag("place", "sea")) {
-        kind = "sea";
-        minZoom = 3;
-      }
+    if (sf.isPoint()) {
+      int minZoom = getInteger(sf, matches, "minZoom", 12);
 
-      var feat = features.point(this.name())
+      var feat = features.point(LAYER_NAME)
         .setId(FeatureId.create(sf))
         .setAttr("kind", kind)
-        // Used for client-side label collisions
-        .setAttr("min_zoom", minZoom + 1)
+        .setAttr("min_zoom", minZoom)
+        .setSortKey(minZoom)
         .setZoomRange(minZoom, 15);
 
-      // Server sort features so client label collisions are pre-sorted
-      feat.setSortKey(minZoom);
       OsmNames.setOsmNames(feat, sf, 0);
     }
 
-    if (sf.hasTag("name") && sf.getTag("name") != null &&
-      sf.canBePolygon() &&
-      (sf.hasTag("water") ||
-        sf.hasTag("waterway") ||
-        // bay, strait, fjord are included here only (not in water layer) because
-        // OSM treats them as "overlay" label features over the normal water polys
-        sf.hasTag("natural", "water", "bay", "strait", "fjord") ||
-        sf.hasTag("landuse", "reservoir") ||
-        sf.hasTag("leisure", "swimming_pool"))) {
-      String kind = "other";
-      var kindDetail = "";
-      var nameMinZoom = 15;
-      var reservoir = false;
-      var alkaline = false;
+    // points from polygons
+    if (sf.hasTag("name") && sf.canBePolygon()) {
+      int nameMinZoom = 15;
       Double wayArea = 0.0;
 
       try {
         wayArea = sf.area() / WORLD_AREA_FOR_70K_SQUARE_METERS;
       } catch (GeometryException e) {
         e.log("Exception in way area calculation");
-      }
-
-      // coalesce values across tags to single kind value
-      if (sf.hasTag("amenity", "fountain")) {
-        kind = "fountain";
-      } else if (sf.hasTag("natural", "water", "bay", "strait", "fjord")) {
-        kind = sf.getString("natural");
-        if (sf.hasTag("water", "basin", "canal", "ditch", "drain", "lake", "river", "stream")) {
-          kindDetail = sf.getString("water");
-
-          // This is a bug in Tilezen v1.9 that should be fixed in 2.0
-          // But isn't present in Protomaps v2 so let's fix it preemptively
-          if (kindDetail.equals("lake")) {
-            kind = "lake";
-          }
-
-          if (sf.hasTag("water", "lagoon", "oxbow", "pond", "reservoir", "wastewater")) {
-            kindDetail = "lake";
-          }
-
-          if (sf.hasTag("water", "reservoir")) {
-            reservoir = true;
-          }
-          if (sf.hasTag("water", "lagoon", "salt", "salt_pool")) {
-            alkaline = true;
-          }
-        }
-      } else if (sf.hasTag("waterway", "riverbank", "dock", "canal", "river", "stream", "ditch", "drain")) {
-        kind = sf.getString("waterway");
-      } else if (sf.hasTag("landuse", "basin", "reservoir")) {
-        kind = sf.getString("landuse");
-      } else if (sf.hasTag("leisure", "swimming_pool")) {
-        kind = "swimming_pool";
-      } else if (sf.hasTag("amenity", "swimming_pool")) {
-        kind = "swimming_pool";
       }
 
       // We don't want to show too many water labels at early zooms else it crowds the map
@@ -343,8 +349,7 @@ public class Water implements ForwardingProfile.LayerPostProcessor {
         nameMinZoom = 14;
       }
 
-      var waterLabelPosition = features.pointOnSurface(this.name())
-        // Core Tilezen schema properties
+      var waterLabelPosition = features.pointOnSurface(LAYER_NAME)
         .setAttr("kind", kind)
         .setAttr("kind_detail", kindDetail)
         // While other layers don't need min_zoom, physical point labels do for more
@@ -357,24 +362,8 @@ public class Water implements ForwardingProfile.LayerPostProcessor {
         .setAttrWithMinzoom("layer", Parse.parseIntOrNull(sf.getString("layer")), 12)
         .setZoomRange(nameMinZoom, 15)
         .setAttr("sort_rank", 200)
+        .setSortKey(nameMinZoom)
         .setBufferPixels(128);
-
-      // Add less common core Tilezen attributes only at higher zooms (will continue to v4)
-      if (!kindDetail.isEmpty()) {
-        waterLabelPosition.setAttr("kind_detail", kindDetail);
-      }
-      if (sf.hasTag("water", "reservoir") || reservoir) {
-        waterLabelPosition.setAttr("reservoir", true);
-      }
-      if (sf.hasTag("water", "lagoon", "salt", "salt_pool") || alkaline) {
-        waterLabelPosition.setAttr("alkaline", true);
-      }
-      if (sf.hasTag("intermittent", "yes")) {
-        waterLabelPosition.setAttr("intermittent", true);
-      }
-
-      // Server sort features so client label collisions are pre-sorted
-      waterLabelPosition.setSortKey(nameMinZoom);
 
       OsmNames.setOsmNames(waterLabelPosition, sf, 0);
     }
@@ -382,7 +371,6 @@ public class Water implements ForwardingProfile.LayerPostProcessor {
 
   @Override
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) throws GeometryException {
-    // TODO filter to only polygons
     return FeatureMerge.mergeOverlappingPolygons(items, 1);
   }
 }

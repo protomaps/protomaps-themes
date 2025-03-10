@@ -41,7 +41,7 @@ class WaterTest extends LayerTest {
       List.of(Map.of("kind", "fountain")),
       process(SimpleFeature.create(
         newPolygon(0, 0, 0, 1, 1, 1, 0, 0),
-        new HashMap<>(Map.of("natural", "water", "amenity", "fountain")),
+        new HashMap<>(Map.of("amenity", "fountain")),
         "osm",
         null,
         0
@@ -84,7 +84,9 @@ class WaterTest extends LayerTest {
       List.of(Map.of("kind", "ocean")),
       process(SimpleFeature.create(
         newPoint(1, 1),
-        new HashMap<>(Map.of("place", "ocean")),
+        new HashMap<>(Map.of("place", "ocean",
+          "name", "a"
+        )),
         "osm",
         null,
         0
